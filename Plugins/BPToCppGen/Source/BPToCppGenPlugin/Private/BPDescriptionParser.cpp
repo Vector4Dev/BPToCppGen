@@ -47,6 +47,28 @@ TArray<FBPParamDesc> FBPDescriptionParser::ParseParamList(const FString& ParamLi
 	return Result;
 }
 
+bool FBPDescriptionParser::FindMatchingParen(const FString& Text, int32 OpenIndex, int32& OutCloseIndex)
+{
+	int32 Depth = 0;
+	for (int32 Index = OpenIndex; Index < Text.Len(); ++Index)
+	{
+		if (Text[Index] == TEXT('('))
+		{
+			++Depth;
+		}
+		else if (Text[Index] == TEXT(')'))
+		{
+			--Depth;
+			if (Depth == 0)
+			{
+				OutCloseIndex = Index;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool FBPDescriptionParser::ParseHeaderLine(const FString& Line, FBPClassDesc& OutClassDesc)
 {
 	FString Key;
@@ -75,24 +97,22 @@ bool FBPDescriptionParser::ParseHeaderLine(const FString& Line, FBPClassDesc& Ou
 
 bool FBPDescriptionParser::ParseVariableLine(const FString& Line, FBPVariableDesc& OutVariable)
 {
-	FString NamePart;
-	FString Rest;
-	if (!Line.Split(TEXT("("), &NamePart, &Rest))
+	const int32 OpenIndex = Line.Find(TEXT("("));
+	if (OpenIndex == INDEX_NONE)
 	{
 		return false;
 	}
 
-	FString TypePart;
-	FString AfterType;
-	if (!Rest.Split(TEXT(")"), &TypePart, &AfterType))
+	int32 CloseIndex = INDEX_NONE;
+	if (!FindMatchingParen(Line, OpenIndex, CloseIndex))
 	{
 		return false;
 	}
 
-	OutVariable.Name = NamePart.TrimStartAndEnd();
-	OutVariable.Type = TypePart.TrimStartAndEnd();
+	OutVariable.Name = Line.Left(OpenIndex).TrimStartAndEnd();
+	OutVariable.Type = Line.Mid(OpenIndex + 1, CloseIndex - OpenIndex - 1).TrimStartAndEnd();
 
-	AfterType.TrimStartAndEndInline();
+	FString AfterType = Line.Mid(CloseIndex + 1).TrimStartAndEnd();
 	if (AfterType.StartsWith(TEXT("=")))
 	{
 		OutVariable.DefaultValue = AfterType.RightChop(1).TrimStartAndEnd();
@@ -104,24 +124,22 @@ bool FBPDescriptionParser::ParseVariableLine(const FString& Line, FBPVariableDes
 
 bool FBPDescriptionParser::ParseFunctionLine(const FString& Line, FBPFunctionDesc& OutFunction)
 {
-	FString NamePart;
-	FString Rest;
-	if (!Line.Split(TEXT("("), &NamePart, &Rest))
+	const int32 OpenIndex = Line.Find(TEXT("("));
+	if (OpenIndex == INDEX_NONE)
 	{
 		return false;
 	}
 
-	FString ParamsPart;
-	FString AfterParams;
-	if (!Rest.Split(TEXT(")"), &ParamsPart, &AfterParams))
+	int32 CloseIndex = INDEX_NONE;
+	if (!FindMatchingParen(Line, OpenIndex, CloseIndex))
 	{
 		return false;
 	}
 
-	OutFunction.Name = NamePart.TrimStartAndEnd();
-	OutFunction.Params = ParseParamList(ParamsPart);
+	OutFunction.Name = Line.Left(OpenIndex).TrimStartAndEnd();
+	OutFunction.Params = ParseParamList(Line.Mid(OpenIndex + 1, CloseIndex - OpenIndex - 1));
 
-	AfterParams.TrimStartAndEndInline();
+	FString AfterParams = Line.Mid(CloseIndex + 1).TrimStartAndEnd();
 	if (AfterParams.StartsWith(TEXT("->")))
 	{
 		OutFunction.ReturnType = AfterParams.RightChop(2).TrimStartAndEnd();
@@ -136,24 +154,23 @@ bool FBPDescriptionParser::ParseFunctionLine(const FString& Line, FBPFunctionDes
 
 bool FBPDescriptionParser::ParseEventLine(const FString& Line, FBPEventDesc& OutEvent)
 {
-	FString NamePart;
-	FString Rest;
-	if (!Line.Split(TEXT("("), &NamePart, &Rest))
+	const int32 OpenIndex = Line.Find(TEXT("("));
+	if (OpenIndex == INDEX_NONE)
 	{
 		OutEvent.Name = Line.TrimStartAndEnd();
 		OutEvent.bOverride = false;
 		return !OutEvent.Name.IsEmpty();
 	}
 
-	FString ModifierPart;
-	FString AfterModifiers;
-	if (!Rest.Split(TEXT(")"), &ModifierPart, &AfterModifiers))
+	int32 CloseIndex = INDEX_NONE;
+	if (!FindMatchingParen(Line, OpenIndex, CloseIndex))
 	{
 		return false;
 	}
 
-	OutEvent.Name = NamePart.TrimStartAndEnd();
+	OutEvent.Name = Line.Left(OpenIndex).TrimStartAndEnd();
 
+	const FString ModifierPart = Line.Mid(OpenIndex + 1, CloseIndex - OpenIndex - 1);
 	TArray<FString> Tokens;
 	ModifierPart.ParseIntoArray(Tokens, TEXT(","), true);
 
@@ -336,6 +353,20 @@ bool FBPDescriptionParser::Parse(const FString& SourceText, FBPClassDesc& OutCla
 	if (OutClassDesc.ParentClass.IsEmpty())
 	{
 		OutErrors.Add(TEXT("Missing 'Parent:' line"));
+	}
+
+	static const TArray<FString> CommonOverrideNames =
+	{
+		TEXT("BeginPlay"), TEXT("Tick"), TEXT("EndPlay"), TEXT("OnConstruction"),
+		TEXT("NativeConstruct"), TEXT("NativeDestruct"), TEXT("Destroyed"), TEXT("PostInitializeComponents")
+	};
+
+	for (const FBPEventDesc& Event : OutClassDesc.Events)
+	{
+		if (!Event.bOverride && CommonOverrideNames.Contains(Event.Name))
+		{
+			OutErrors.Add(FString::Printf(TEXT("Event '%s' has no (override) modifier; it will be generated as a separate custom event, not a real engine override. Add '(override)' if that wasn't intended"), *Event.Name));
+		}
 	}
 
 	return OutClassDesc.ClassName.Len() > 0 && OutClassDesc.ParentClass.Len() > 0;

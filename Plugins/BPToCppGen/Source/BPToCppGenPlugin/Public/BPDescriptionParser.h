@@ -18,6 +18,7 @@ public:
 	static FString Serialize(const FBPClassDesc& ClassDesc);
 
 private:
+	static bool FindMatchingParen(const FString& Text, int32 OpenIndex, int32& OutCloseIndex);
 	static bool ParseHeaderLine(const FString& Line, FBPClassDesc& OutClassDesc);
 	static bool ParseVariableLine(const FString& Line, FBPVariableDesc& OutVariable);
 	static bool ParseFunctionLine(const FString& Line, FBPFunctionDesc& OutFunction);

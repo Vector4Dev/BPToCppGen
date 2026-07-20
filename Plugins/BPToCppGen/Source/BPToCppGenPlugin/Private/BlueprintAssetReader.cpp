@@ -120,6 +120,30 @@ FString FBlueprintAssetReader::PinTypeToString(const FEdGraphPinType& PinType)
 	return BaseType;
 }
 
+FString FBlueprintAssetReader::MakeSafeIdentifier(const FString& RawName)
+{
+	FString Result;
+	for (const TCHAR Ch : RawName)
+	{
+		if (FChar::IsAlnum(Ch) || Ch == TEXT('_'))
+		{
+			Result += Ch;
+		}
+	}
+
+	if (Result.IsEmpty())
+	{
+		return TEXT("UnnamedIdentifier");
+	}
+
+	if (FChar::IsDigit(Result[0]))
+	{
+		Result = TEXT("_") + Result;
+	}
+
+	return Result;
+}
+
 bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& OutClassDesc, TArray<FString>& OutWarnings)
 {
 	if (!Blueprint)
@@ -134,7 +158,11 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 	for (const FBPVariableDescription& VarDesc : Blueprint->NewVariables)
 	{
 		FBPVariableDesc Variable;
-		Variable.Name = VarDesc.VarName.ToString();
+		Variable.Name = MakeSafeIdentifier(VarDesc.VarName.ToString());
+		if (Variable.Name != VarDesc.VarName.ToString())
+		{
+			OutWarnings.Add(FString::Printf(TEXT("Variable name '%s' contained invalid characters, sanitized to '%s'"), *VarDesc.VarName.ToString(), *Variable.Name));
+		}
 		Variable.Type = PinTypeToString(VarDesc.VarType);
 		if (!VarDesc.DefaultValue.IsEmpty())
 		{
@@ -173,7 +201,12 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 		}
 
 		FBPFunctionDesc Function;
-		Function.Name = Graph->GetName();
+		const FString RawFunctionName = Graph->GetName();
+		Function.Name = MakeSafeIdentifier(RawFunctionName);
+		if (Function.Name != RawFunctionName)
+		{
+			OutWarnings.Add(FString::Printf(TEXT("Function name '%s' contained invalid characters, sanitized to '%s'"), *RawFunctionName, *Function.Name));
+		}
 
 		for (const TSharedPtr<FUserPinInfo>& PinInfo : EntryNode->UserDefinedPins)
 		{
@@ -182,7 +215,7 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 				continue;
 			}
 			FBPParamDesc Param;
-			Param.Name = PinInfo->PinName.ToString();
+			Param.Name = MakeSafeIdentifier(PinInfo->PinName.ToString());
 			Param.Type = PinTypeToString(PinInfo->PinType);
 			Function.Params.Add(Param);
 		}
@@ -208,7 +241,12 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 			if (UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
 			{
 				FBPEventDesc Event;
-				Event.Name = CustomEvent->CustomFunctionName.ToString();
+				const FString RawEventName = CustomEvent->CustomFunctionName.ToString();
+				Event.Name = MakeSafeIdentifier(RawEventName);
+				if (Event.Name != RawEventName)
+				{
+					OutWarnings.Add(FString::Printf(TEXT("Event name '%s' contained invalid characters, sanitized to '%s'"), *RawEventName, *Event.Name));
+				}
 				Event.bOverride = false;
 
 				for (const TSharedPtr<FUserPinInfo>& PinInfo : CustomEvent->UserDefinedPins)
@@ -218,7 +256,7 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 						continue;
 					}
 					FBPParamDesc Param;
-					Param.Name = PinInfo->PinName.ToString();
+					Param.Name = MakeSafeIdentifier(PinInfo->PinName.ToString());
 					Param.Type = PinTypeToString(PinInfo->PinType);
 					Event.Params.Add(Param);
 				}
@@ -233,7 +271,12 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 				}
 
 				FBPEventDesc Event;
-				Event.Name = EventNode->EventReference.GetMemberName().ToString();
+				const FString RawEventName = EventNode->EventReference.GetMemberName().ToString();
+				Event.Name = MakeSafeIdentifier(RawEventName);
+				if (Event.Name != RawEventName)
+				{
+					OutWarnings.Add(FString::Printf(TEXT("Event name '%s' contained invalid characters (likely an Enhanced Input action display name), sanitized to '%s'"), *RawEventName, *Event.Name));
+				}
 				Event.bOverride = true;
 
 				for (UEdGraphPin* Pin : EventNode->Pins)
@@ -247,7 +290,7 @@ bool FBlueprintAssetReader::ReadBlueprint(UBlueprint* Blueprint, FBPClassDesc& O
 						continue;
 					}
 					FBPParamDesc Param;
-					Param.Name = Pin->PinName.ToString();
+					Param.Name = MakeSafeIdentifier(Pin->PinName.ToString());
 					Param.Type = PinTypeToString(Pin->PinType);
 					Event.Params.Add(Param);
 				}

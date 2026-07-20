@@ -169,11 +169,50 @@ FString FVerseSkeletonGenerator::BuildParamString(const TArray<FBPParamDesc>& Pa
 	return Result;
 }
 
+bool FVerseSkeletonGenerator::IsVerseReservedWord(const FString& Identifier)
+{
+	static const TSet<FString> ReservedWords =
+	{
+		TEXT("var"), TEXT("class"), TEXT("if"), TEXT("for"), TEXT("loop"), TEXT("true"), TEXT("false"),
+		TEXT("return"), TEXT("and"), TEXT("or"), TEXT("not"), TEXT("block"), TEXT("spawn"), TEXT("defer"),
+		TEXT("else"), TEXT("until"), TEXT("break"), TEXT("continue"), TEXT("set"), TEXT("local"), TEXT("in"),
+		TEXT("is"), TEXT("module"), TEXT("using"), TEXT("enum"), TEXT("struct"), TEXT("interface"), TEXT("case")
+	};
+	return ReservedWords.Contains(Identifier.ToLower());
+}
+
+void FVerseSkeletonGenerator::CheckIdentifier(const FString& Identifier, const FString& Context, TArray<FString>& OutWarnings)
+{
+	if (IsVerseReservedWord(Identifier))
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s '%s' is a Verse reserved word and will fail to compile, rename it"), *Context, *Identifier));
+	}
+	if (Identifier.Len() > 0 && FChar::IsDigit(Identifier[0]))
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s '%s' starts with a digit, which Verse identifiers cannot do, rename it"), *Context, *Identifier));
+	}
+}
+
+FString FVerseSkeletonGenerator::SanitizeClassIdentifier(const FString& RawIdentifier, TArray<FString>& OutWarnings)
+{
+	if (RawIdentifier.IsEmpty())
+	{
+		OutWarnings.Add(TEXT("Class name reduced to an empty identifier after conversion, defaulted to 'generated_device', rename it"));
+		return TEXT("generated_device");
+	}
+	if (FChar::IsDigit(RawIdentifier[0]))
+	{
+		OutWarnings.Add(FString::Printf(TEXT("Class identifier '%s' starts with a digit, which Verse does not allow, prefixed with 'device_'"), *RawIdentifier));
+		return TEXT("device_") + RawIdentifier;
+	}
+	return RawIdentifier;
+}
+
 FGeneratedVerseCode FVerseSkeletonGenerator::Generate(const FBPClassDesc& ClassDesc, TArray<FString>& OutWarnings)
 {
 	FGeneratedVerseCode Result;
 
-	const FString ClassIdentifier = ToSnakeCase(ClassDesc.ClassName);
+	const FString ClassIdentifier = SanitizeClassIdentifier(ToSnakeCase(ClassDesc.ClassName), OutWarnings);
 
 	if (!ClassDesc.ParentClass.IsEmpty())
 	{
@@ -208,6 +247,7 @@ FGeneratedVerseCode FVerseSkeletonGenerator::Generate(const FBPClassDesc& ClassD
 		Text += TEXT("\n");
 		for (const FBPVariableDesc& Variable : ClassDesc.Variables)
 		{
+			CheckIdentifier(Variable.Name, TEXT("Variable"), OutWarnings);
 			const FString VerseType = MapTypeToVerse(Variable.Type);
 			const FString DefaultVal = Variable.bHasDefault ? Variable.DefaultValue : DefaultVerseValue(VerseType);
 			Text += TEXT("    @editable\n");
@@ -260,6 +300,7 @@ FGeneratedVerseCode FVerseSkeletonGenerator::Generate(const FBPClassDesc& ClassD
 	{
 		for (const FBPFunctionDesc& Function : ClassDesc.Functions)
 		{
+			CheckIdentifier(Function.Name, TEXT("Function"), OutWarnings);
 			const FString ReturnType = MapTypeToVerse(Function.ReturnType);
 			Text += FString::Printf(TEXT("    %s(%s) : %s =\n"), *Function.Name, *BuildParamString(Function.Params), *ReturnType);
 			Text += FString::Printf(TEXT("        %s\n\n"), *DefaultVerseValue(ReturnType));
@@ -270,6 +311,7 @@ FGeneratedVerseCode FVerseSkeletonGenerator::Generate(const FBPClassDesc& ClassD
 	{
 		for (const FBPEventDesc& Event : CustomEvents)
 		{
+			CheckIdentifier(Event.Name, TEXT("Event"), OutWarnings);
 			Text += FString::Printf(TEXT("    %s(%s) : void =\n"), *Event.Name, *BuildParamString(Event.Params));
 			Text += TEXT("        void\n\n");
 		}

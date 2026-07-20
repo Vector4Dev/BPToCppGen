@@ -15,4 +15,5 @@ public:
 private:
 	static FString PinTypeToString(const FEdGraphPinType& PinType);
 	static FString ClassToCppName(const UClass* Class);
+	static FString MakeSafeIdentifier(const FString& RawName);
 };
